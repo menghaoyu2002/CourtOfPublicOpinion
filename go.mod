@@ -3,6 +3,7 @@ module courtOfPublicOpinion/api
 go 1.21
 
 require (
+	github.com/emirpasic/gods v1.18.1
 	github.com/go-rod/rod v0.114.3
 	github.com/labstack/echo/v4 v4.11.1
 )
