@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -14,6 +13,11 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/labstack/echo/v4"
 )
+
+type Pair[T, U any] struct {
+	First  T
+	Second U
+}
 
 var browser = rod.New()
 var positiveWords = generateWordSet("../data/positive-words.txt")
@@ -37,54 +41,64 @@ func handleSearch(context echo.Context) error {
 
 	page := browser.MustConnect().MustPage(yt)
 	defer page.MustClose()
-
 	links := page.MustWaitDOMStable().MustElements("a#video-title")
-	c := make(chan float64, len(links))
+	score := 0.0
+	visits := 0
 	for i := 0; i < len(links); i++ {
 		link := links[i].MustProperty("href").String()
 
 		// ignore youtube shorts
 		if matched, _ := regexp.Match(`.*/shorts/.*`, []byte(link)); !matched {
-			go visitVideo(browser, link, c)
+			increment := visitVideo(browser, link)
+			score += increment
+            // ignore insignificant stats
+			if increment != 0 {
+				visits++
+			}
+
 		}
 	}
 
-    score := 0.0
-    for i := 0; i < len(links); i++ {
-        s, _ := <- c
-        fmt.Println(s)
-        score += s
-    }
-
-    return context.String(http.StatusOK, fmt.Sprintf("%f", score))
+	return context.String(http.StatusOK, fmt.Sprintf("%f", score))
 }
 
-func visitVideo(browser *rod.Browser, link string, c chan float64) {
-	page := browser.MustConnect().MustPage(link).MustWaitDOMStable()
+func visitVideo(browser *rod.Browser, link string) float64 {
+	page := browser.MustConnect().MustPage(link)
 	defer page.MustClose()
 
 	page.MustElement("#button-shape").MustClick()
-	page.MustElementR("yt-formatted-string", "Show transcript").MustClick()
+	hasTranscript, transcriptButton, err := page.HasR("yt-formatted-string", "Show transcript")
+
+	if err != nil || !hasTranscript {
+		return 0.0
+	}
+
+	transcriptButton.MustClick()
+
+	transcript := page.MustWaitStable().MustElements("yt-formatted-string.ytd-transcript-segment-renderer")
+	c := make(chan Pair[int, int], 2*len(transcript))
+	for i := 0; i < len(transcript); i++ {
+		go getSentimentScore(transcript[i].MustText(), c)
+	}
 
 	score := 0
 	wordCount := 0
-	transcript := page.MustWaitStable().MustElements("yt-formatted-string.ytd-transcript-segment-renderer")
 	for i := 0; i < len(transcript); i++ {
-		s, w := getSentimentScore(transcript[i].MustText())
-		score += s
-		wordCount += w
+		res := <-c
+		score += res.First
+		wordCount += res.Second
 	}
 
-	averageSentiment := float64(score) / float64(wordCount)
+	if wordCount == 0 {
+		return 0.0
+	}
 
-	c <- averageSentiment
+	return float64(score) / float64(wordCount)
+
 }
 
 func generateWordSet(path string) *hashset.Set {
-
-	ex, _ := os.Executable()
-	dir := filepath.Dir(ex)
-	f, err := os.Open(filepath.Join(dir, path))
+	f, err := os.Open(path)
 
 	if err != nil {
 		log.Fatal(err)
@@ -106,7 +120,7 @@ func generateWordSet(path string) *hashset.Set {
 	return set
 }
 
-func getSentimentScore(s string) (int, int) {
+func getSentimentScore(s string, c chan Pair[int, int]) {
 	words := strings.Split(s, " ")
 
 	score := 0
@@ -122,6 +136,5 @@ func getSentimentScore(s string) (int, int) {
 			}
 		}
 	}
-
-	return score, len(words)
+	c <- Pair[int, int]{score, len(words)}
 }
