@@ -14,7 +14,7 @@ bad things:
 - could not get goroutines to work with opening tabs and youtube videos
 - bad things happen if i try. tabs die or run out of memeory
 - this means that we can only process one youtube video at a time
-- this means that this api call is incredbly slow and blocks the main thread
+- this means that this api call is incredibly slow and blocks the main thread
 - this means that this is ridiculously slow as the number of users go up
 - unscable
 - on average takes 3 minutes to process one request
